@@ -1,0 +1,502 @@
+---
+title: "Time Series Forecasting Los Angeles Climate"
+output:
+  html_document:
+    df_print: paged
+  pdf_document:
+    latex_engine: xelatex
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(eval = TRUE)
+knitr::opts_chunk$set(warning = FALSE)
+knitr::opts_chunk$set(message = FALSE)
+
+```
+
+
+# Abstract
+In this time series analysis project, the selected dataset entails average temperature in Los Angeles from 1877 to 2023, obtained from Climate Explorer. The goal was to generate accurate forecasts of future temperatures, providing critical insights for climate change debates. Using R, the raw daily data was aggregated into annual means and then subjected to various time series techniques, including log transformation, differencing, ACF/PACF comparison, and AIC computation for model selection.
+
+The analysis emerged on two models, AR(2) and MA(1), with both passing diagnostics checks. The MA(1) model was ultimately chosen due to its lower AIC value and simplicity. Interestingly, this model accurately forecasted short-term future temperatures for 11 years, effectively matching them with the actual observed values. This validates the model's predictive capacity in the short-term, demonstrating its utility in the context of yearly climatic fluctuations. However, for longer-term forecasts, the model's confidence interval widened significantly, underlining the model's limitations over a longer timeframe and suggesting a decrease in predictive certainty. This characteristic serves as a crucial reminder of the complexities inherent in long-term climatic predictions and the critical importance of cautious interpretation in these instances. This study underscores the value of time series analysis in understanding and predicting climate change trends while highlighting the need for ongoing research and continuous model refinement for long-term forecasts.
+
+
+# Introduction
+The dataset I have chosen for the Temperature Time Series project is the Los Angeles average temperature dataset, extracted from the Climate Explorer website by NOAA (National Oceanic and Atmospheric Administration). The dataset consists of date and daily Los Angeles mean temperature data from 1877 to 2023. In order to obtain the annual data from daily data, I aggregated to calculate the annual mean temperature from 1880 to 2022, which amounts to 143 observations. This dataset was partitioned into a training set with 132 entries and a test set with 11 entries, used for validating our forecasting model. I selected this dataset with the intention of obtaining additional understanding regarding climate change. I believe this data is crucial to analyze in order to address the skepticism presented by climate change conspiracy theorists.
+
+I utilized the R software to forecast future temperatures in Los Angeles. Initially, the dataset revealed a non-stationary pattern, including a clear increasing trend and non-constant variance. I applied a series of transformations such as log transformation and differencing at lag 1 to make the data stationary. The process of identifying potential models for forecasting involved analyzing the Autocorrelation Function (ACF) and Partial Autocorrelation Function (PACF) plot of the dataset. After the model comparison based on the AIC, the Autoregressive Model of order 2 (AR(2)) and Moving Average Model of order 1 (MA(1)) were identified as the most fitting models due to their lower AIC values. Further diagnostic checks led to the selection of the MA(1) model for its relative simplicity and performance in terms of the AIC value, enabling successful short-term forecasts. However, this model showed limitations in long-term predictions, reflected in a widening confidence interval that signifies a decrease in predictive certainty over longer periods. This highlights the intricate challenges in forecasting future climate patterns, underscoring the need for ongoing research in this pivotal area.
+
+# Reading the Data and Preparation
+```{r}
+# load the data
+temp_data <- read.csv('USW00093134-temperature-degreeF.csv')
+head(temp_data)
+```
+
+
+```{r}
+# Extracting only Year from date column
+temp_data$date <- as.numeric(substr(temp_data$date, 1, 4))
+head(temp_data)
+```
+
+
+Before my analysis, I aggregated the data using the 'aggregate()' function to calculate the annual mean temperature from the daily temperature data, which groups the mean column of temp_data by the date column, and calculates the mean for each year.
+
+```{r}
+# Calculating annual mean temperature for each year
+annual_mean_data <- aggregate(temp_data$mean, list(temp_data$date), mean, na.rm = TRUE)
+names(annual_mean_data) <- c("Year", "Annual_Mean")
+# Subset data to include only years up to 2022
+annual_mean_data <- annual_mean_data[annual_mean_data$Year >= 1880 & annual_mean_data$Year <= 2022,]
+head(annual_mean_data)
+tail(annual_mean_data)
+```
+
+
+
+
+```{r}
+# Convert the Date column to a Date object
+annual_mean_data$Year <- as.Date(paste(annual_mean_data$Year, 1, 1, sep = "-"), format = "%Y-%m-%d")
+annual_mean_ts <- ts(annual_mean_data$Annual_Mean, start = c(1880), end = c(2022))
+```
+
+```{r}
+# Plot the time series
+ts.plot(annual_mean_ts, main = "Los Angeles Mean Temperature (1880 - 2022)", 
+        ylab = "temperature (°F)", xlab = "Year")
+
+# Calculate the mean of the plot
+mean_val <- mean(annual_mean_ts)
+
+# Add a horizontal line at the mean value
+abline(h=mean_val, col="blue", lwd=1)
+
+# %added trend to data plot
+fit <- lm(annual_mean_ts ~ time(annual_mean_ts))
+abline(fit, col="red", lwd=1)
+
+```
+
+# Partitioning the Dataset
+After the transformation into an annual data, the dataset has 143 observations, and I have partitioned the data into a training set containing the 132 entries, and left 11 more data points as a testing set for model validation in the future.
+```{r}
+# Partition data into training and test dataset
+x = length(annual_mean_ts)
+train_data <- annual_mean_ts[1:132] # 132 entries
+test_data <- annual_mean_ts[1:length(annual_mean_ts)] # for model validation
+```
+
+# Exploratory Data Analysis
+To begin my analysis, I utilized a time series function to plot the training set with its mean and trend. I set the start date to 1880 and the end date to 2022. I did not have to add frequency because it is an annual data.
+```{r}
+# Plot the training data
+ts.plot(train_data, main = "Plot of Training Set", 
+        ylab = "temperature (°F)", xlab = "Time")
+
+# Add trend line to training data plot
+fit_train <- lm(train_data ~ time(train_data))
+abline(fit_train, col="red", lwd=1)
+
+# Add mean line to training data plot
+mean_train <- mean(train_data)
+abline(h=mean_train, col="blue", lwd=1)
+```
+
+Based on the graph, I noticed several characteristics that indicate the data is highly non-stationary. I observe that there is an increasing trend throughout the years. Additionally, the graph depicts cyclical increasing and decreasing, which represents non-constant variance and mean.
+
+```{r}
+# Plot histogram of training data
+hist(train_data, col="light blue", main="Histogram of Training Data",
+     xlab="temperature (°F)")
+```
+
+The histogram of the training data seems slightly normal. It does not really show any skewness.
+
+```{r}
+# Plot ACF of training data
+acf(train_data, lag.max=60, main="ACF of the Training Data")
+
+```
+
+On the other hand, the ACFs of the training data remain very large. Therefore, I conclude that the data is not stationary. Time series model building is typically done under the assumption that the data is normally distributed and stationary. In order to stabilize the variance, I will apply some transformation techniques for this data. Moreover, in order to remove an increasing trend, differencing is necessary.
+
+
+I tried applying the Box-Cox transformation to normalize the data. The Box-Cox transformation is a statistical tool used to normalize data. It finds an optimal value, lambda (λ), that maximizes the log-likelihood function. By raising the data to the power of λ, the transformation helps make the data more suitable. A higher log-likelihood indicates a better fit of the model to the observed data. Thus, using the Box-Cox transformation can lead to more accurate modeling and improved predictions.
+```{r}
+# Plotting the Box-Cox Transformation graph
+library(MASS)
+t = 1:length(train_data)
+bcTransform = boxcox(train_data ~ t,plotit = TRUE)
+```
+
+The dashed vertical lines in the plot represent a 95% confidence interval for the true value of lambda in the Box-Cox transformation. 
+
+```{r}
+# Finding the value of lambda
+bcTransform$x[which(bcTransform$y == max(bcTransform$y))]
+lambda=bcTransform$x[which(bcTransform$y == max(bcTransform$y))]
+```
+However, the box-cox transformation worked poorly, and the box-cox transformation plot shows a very big confidence interval, which includes lambda = 0. This implies that the Box-Cox transformation effectively reduces to a simple log transformation. Therefore, I will use log transformation to reduce variance.
+
+```{r}
+# log transformation
+logtrain = log(train_data)
+
+# Histogram comparison
+op <- par(mfrow = c(1,2))
+hist(train_data, col="light blue", xlab="", main="histogram;train data")
+hist(logtrain, col="light blue", xlab="", main="histogram;log transformed train data") 
+
+
+```
+
+The histogram of the Log transformed data gave a more symmetric histogram, and more even variance.
+
+
+```{r}
+# Plot the original train data
+ts.plot(train_data, main = "Plot of Training Set", 
+        ylab = "train_data", xlab = "Time")
+# Plot the logtrain data
+ts.plot(logtrain, main = "Plot of log transformed training Set", 
+        ylab = "log(train_data)", xlab = "Time")
+```
+
+The plot also shows the variance of the log transformed training set is more stable after log transformation. Now, the data is not stationary yet because there is an increasing trend. Thus, I
+will difference it at lag 1 to remove the trend.
+
+
+```{r}
+# differencing at lag 1 to remove trend
+train_data.bcddddd<- diff(logtrain, lag=1)
+```
+
+```{r}
+# Checking train_data.bcddddd
+ts.plot(train_data.bcddddd, 
+        main = "Plot of log transformed, differenced at lag 1 training Set", 
+        ylab = "train_data.bcddddd", xlab = "Time")
+fit <- lm(train_data.bcddddd ~ as.numeric(1:length(train_data.bcddddd))); abline(fit, col="red")
+abline(h=mean(train_data.bcddddd), col="blue")
+acf(train_data.bcddddd, lag.max = 40, 
+    main = "ACF: log Transformed, differenced at lag 1", cex.main = 0.8)
+```
+
+
+The plot of the log transformed, differenced at lag 1, shows no seasonality, lower variance, and no trend. Also, looking at the ACFs, seasonality is no longer apparent, and ACF decay corresponds to a stationary process. Thus, I can conclude to work with log transformed, differenced at lag 1 train data.
+
+
+```{r}
+# Comparing histograms: train_data.bcddddd vs logtrain
+hist(logtrain, col="light blue", xlab="", 
+     main="histogram; log transformed")
+hist(train_data.bcddddd, col="light blue", 
+     xlab="", main="histogram; log transformed and differenced at lag 1")
+
+```
+
+
+Comparing histograms of log transformed data, the histogram of log transformed, and differenced at lag 1 looks symmetric and more gaussian.
+
+```{r}
+var(train_data) # train data
+var(logtrain) # log transformed train data
+var(train_data.bcddddd) # log transformed, differenced at lag 1 train data
+
+```
+Lastly, the variance of each data decreased for each transformation and differencing. I confirmed to work with log transformed, and differenced at lag 1 train data (train_data.bcddddd). Now, I will look at ACF and PACF of train_data.bcddddd to list some candidate models to try.
+
+
+```{r}
+# Histogram with the normal curve
+hist(train_data.bcddddd, density=20,breaks=20, col="blue", xlab="", prob=TRUE)
+m<-mean(train_data.bcddddd)
+std<- sqrt(var(train_data.bcddddd))
+curve( dnorm(x,m,std), add=TRUE )
+
+```
+
+```{r}
+# Determine p q values
+op <- par(mfrow = c(1,2))
+acf(train_data.bcddddd, lag.max=40, main="ACF of the log Transformed, differenced at lag 1")
+pacf(train_data.bcddddd, lag.max=40, main="PACF of the log Transformed, differenced at lags 1")
+# p = 1 or 10
+# d = 1
+# q = 1 or 10
+
+```
+In the ACF plot of the train_data.bcddddd, lags 1, 10 are outside the confidence interval. In the PACF plot, lags 1, 10 are outside the interval, and maybe lag 2. Based on the analysis of both ACF and PACF features, I can conclude to work on ARIMA model and pure AR/MA model. I have a total of 4 ARIMA models to check, where p = 1, 10 (maybe lag 2) and q = 1,10. Also, I will check on Pure MA and AR models where p = 1, 10, 2 and q = 1,10.
+
+
+```{r}
+# ARIMA (1,1,1)
+modellog1 <- arima(logtrain, order=c(1,1,1), method="ML")
+# ARIMA (10,1,1)
+modellog2 <- arima(logtrain, order=c(10,1,1), method="ML")
+# ARIMA (1,1,10)
+modellog3 <- arima(logtrain, order=c(1,1,10), method="ML")
+# ARIMA (10,1,10)
+modellog4 <- arima(logtrain, order=c(10,1,10), method="ML")
+
+modellog1
+modellog2
+modellog3
+modellog4
+```
+
+```{r}
+# Mixed models candidate
+AIC(modellog1) #ARIMA(1,1,1)
+AIC(modellog2) #ARIMA(10,1,1)
+AIC(modellog3) #ARIMA(1,1,10)
+AIC(modellog4) #ARIMA(10,1,10)
+```
+After checking the AIC of the mixed ARIMA models, it turns out that ARIMA (1,1,1) has the lowest AIC: -680.6098. Similarly, out of Pure AR and MA models, it turns out that MA(1) has the lowest AIC: -682.3316.
+
+I selected ARIMA(1,1,1) and MA(1) for my optimal model because they are the models with the lowest AIC values.
+
+
+
+```{r}
+# Find the optimal ar model
+ar(train_data.bcddddd, aic = TRUE, order.max = NULL, method = c("mle"))
+# MA(1)
+modellogma1 <- arima(logtrain, order=c(0,1,1), method="ML")
+# MA(10)
+modellogma2 <- arima(logtrain, order=c(0,1,10), method="ML")
+
+# AR(2)
+modellogar2 <- arima(logtrain, order=c(2,1,0), method="ML")
+# AR(1)
+modellogar1 <- arima(logtrain, order=c(1,1,0), method="ML")
+# AR(10)
+modellogar10 <- arima(logtrain, order=c(10,1,0), method="ML")
+
+modellogar2
+modellogar1
+modellogar10
+modellogma1
+modellogma2
+```
+Looking at the coefficient values, the coefficient of ar(1) is less than twice its standard error, which means the coefficients are within the confidence interval, so we should fix the coefficient to 0, However, fixing ar(1) to 0 will reduce the model MA(1), which is equivalent. Therefore, I will seek another model with the lowest AIC values.
+
+```{r}
+AIC(modellogma1) # MA(1)
+AIC(modellogma2) # MA(10)
+AIC(modellogar2) # AR(2)
+AIC(modellogar1) # AR(1)
+AIC(modellogar10) # AR(10)
+```
+Out of my candidates, interestingly, I found that the AR(2) model has the lowest AIC than other models except MA(1). The AR(2) model has the AIC value of -678.06, and the coefficients are statistically significant as well. Thus, I chose AR(2) and MA(1) as my optimal model.
+
+
+```{r}
+# possible candidate, but failed
+modellog1
+```
+
+
+```{r}
+# 2 best model
+modellogar2 # AR(2)
+modellogma1 # MA(1)
+```
+
+
+To assess the stationarity and invertibility of the models, I will check by plotting the roots of the polynomials. If the roots are outside of the unit circle, it means that the roots' absolute value is greater than 1.
+```{r}
+# Checking stationarity for AR(2)
+source("plot.roots.R")
+plot.roots(NULL,polyroot(c(1, -0.5383,  -0.1820)),
+           main="(1) roots of AR part, nonseasonal ")
+
+```
+
+
+For Model(1), the root of the AR part is outside of the unit circle, so it is stationary. Because it is an autoregressive model, it is invertible.
+
+
+```{r}
+# Checking invertibility for MA(1)
+source("plot.roots.R")
+plot.roots(NULL,polyroot(c(1, -0.5941)),
+           main="(2) roots of MA part, nonseasonal ")
+
+```
+
+
+For Model(2), the root of the MA part is outside of the unit circle, so it is invertible. Because it is an moving average model, it is stationary.
+
+Since both models are invertible and stationary, I will analyze the residuals and conduct a diagnostic checking for each model.
+
+# Diagnostics Checking
+```{r}
+# Diagnostics Checking for Model (1)
+res1 <- residuals(modellogar2)
+hist(res1,density=20,breaks=20, col="blue", xlab="",
+     prob=TRUE, main= "Residuals of Model(1)")
+m <- mean(res1)
+std <- sqrt(var(res1))
+curve( dnorm(x,m,std), add=TRUE )
+plot.ts(res1)
+fitt <- lm(res1 ~ as.numeric(1:length(res1))); abline(fitt, col="red")
+abline(h=mean(res1), col="blue")
+qqnorm(res1,main= "Normal Q-Q Plot for Model(1)")
+qqline(res1,col="blue")
+m # sample mean
+```
+In the residuals plot for model (1), there is no trend, no visible change of variance, no seasonality. Additionally, Sample mean is almost zero: 0.0009876757. The Histogram is similar to gaussian, and the Q-Q plot looks straight.
+
+```{r}
+# ACF and PACF of the residuals for model(1)
+op <- par(mfrow = c(1,2))
+acf(res1, lag.max=40)
+pacf(res1, lag.max=40)
+
+```
+
+
+All ACF of the residuals of model (1) are within confidence intervals. However, lag 10 is slightly outside the confidence interval, which requires further investigation such as using a Ljung-Box test.
+
+
+```{r}
+# Diagnostics for model(1)
+shapiro.test(res1)
+Box.test(res1, lag = 12, type = c("Box-Pierce"), fitdf = 2)
+Box.test(res1, lag = 12, type = c("Ljung-Box"), fitdf = 2)
+Box.test(res1^2, lag = 12, type = c("Ljung-Box"), fitdf = 0)
+```
+I performed the Shapiro-Wilk normality test, Box-Pierce, Ljung-Box, and McLeod-Li test. The Shapiro-Wilk test is used to check if the residuals follow a normal distribution. The Box-Pierce and Ljung-Box tests are used to check for autocorrelation in the residuals at different lags, and McLeod-Li test is used to check for nonlinear dependence in a time series. If our models are correctly specified, we should not see significant autocorrelation in the residuals. Model (1) passes all the tests because the p-values are greater than the significance level: 0.05.
+
+```{r}
+# Diagnostics for model(1)
+ar(res1, aic = TRUE, order.max = NULL, method = c("yule-walker"))
+```
+Lastly, I plotted the residuals for model(1) with yule-walker method, and it selected AR(0), which resembles white noise.
+
+Model (1) has passed all the diagnostic checking, and it is ready to be used for forecasting. However, I will conduct the diagnostic checking for model (2) first, before deciding my final model.
+
+
+```{r}
+# modellogma1 check
+res2 <- residuals(modellogma1)
+hist(res2,density=20,breaks=20, col="blue", xlab="", 
+     prob=TRUE, main = "Residuals of Model(2)")
+m <- mean(res2)
+std <- sqrt(var(res2))
+curve( dnorm(x,m,std), add=TRUE )
+plot.ts(res2)
+fitt <- lm(res2 ~ as.numeric(1:length(res2))); abline(fitt, col="red")
+abline(h=mean(res2), col="blue")
+qqnorm(res2,main= "Normal Q-Q Plot for Model(2) ")
+qqline(res2,col="blue")
+m # Sample Mean
+```
+Similar to model (1) residuals, in model (2) residuals plot, there is no trend, no visible change of variance, and no seasonality. Additionally, Sample mean is almost zero: 0.001415352. The Histogram is similar to gaussian, and the Q-Q plot looks straight as well.
+
+```{r}
+# ACF and PACF of the residuals for model(2)
+op <- par(mfrow = c(1,2))
+acf(res2, lag.max=40)
+pacf(res2, lag.max=40)
+
+```
+
+
+All ACF and PACF of the residuals of model 2 are within confidence intervals, which resembles white noise.
+
+```{r}
+# Diagnostics for model(2)
+shapiro.test(res2)
+Box.test(res2, lag = 12, type = c("Box-Pierce"), fitdf = 1)
+Box.test(res2, lag = 12, type = c("Ljung-Box"), fitdf = 1)
+Box.test(res2^2, lag = 12, type = c("Ljung-Box"), fitdf = 0)
+```
+Model (2) passes all the tests because the p-values are greater than the significance level at 0.05. Additionally, I plotted the residuals for model(1) with yule-walker method, and it selected AR(0), which resembles white noise.
+
+```{r}
+# Diagnostics for model(2)
+ar(res2, aic = TRUE, order.max = NULL, method = c("yule-walker"))
+```
+
+Both model (1) and model (2) have passed all diagnostic checking. Out of the two models, I chose model (2) as my final model because it is a simpler model with lower degree, and it had a lower AIC compared to Model(1).
+
+# Forecasting
+Now, I am going to conduct forecasting with Model (2). To begin with, I produced graph with 12 forecasts on transformed data:
+```{r}
+#Forecasting using model 2:
+library(forecast)
+fit.2 <- arima(logtrain, order=c(0,1,1), method="ML")
+forecast(fit.2) 
+```
+
+```{r}
+# produce graph with 12 forecasts on transformed data
+pred.tr <- predict(fit.2, n.ahead = 11)
+U.tr= pred.tr$pred + 2*pred.tr$se 
+L.tr= pred.tr$pred - 2*pred.tr$se 
+ts.plot(logtrain, xlim=c(1,length(logtrain)+11),
+        ylim = c(min(logtrain),max(U.tr))
+        , main = "graph with 12 forecasts on transformed data")
+lines(U.tr, col="blue", lty="dashed")
+lines(L.tr, col="blue", lty="dashed")
+points((length(logtrain)+1):(length(logtrain)+11), pred.tr$pred, col="red")
+
+# produce graph with forecasts on original data:
+pred.orig <- exp(pred.tr$pred)
+U= exp(U.tr)
+L= exp(L.tr)
+ts.plot(train_data, xlim=c(1,length(train_data)+11), 
+        ylim = c(min(train_data),max(U))
+        , main = "graph with 12 forecasts on original data")
+lines(U, col="blue", lty="dashed")
+lines(L, col="blue", lty="dashed")
+points((length(train_data)+1):(length(train_data)+11), pred.orig, col="red")
+```
+
+
+In both graphs, the 12 forecasts look almost identical, and the confidence interval is almost identical. To further assess the accuracy of these forecasts, a comparison between the plot featuring the forecasts and the actual values will be conducted.
+
+
+```{r}
+# produce graph with 12 forecasts on original data and true values
+ts.plot(test_data, xlim = c(100,length(train_data)+11),
+        ylim = c(min(train_data),max(U)), col="red", 
+        main = "graph with 12 forecasts and true values")
+lines(U, col="blue", lty="dashed")
+lines(L, col="blue", lty="dashed")
+points((length(train_data)+1):(length(train_data)+11), pred.orig[1:11], col="black")
+
+```
+
+
+The graph with forecasts and true values presents that all the test set values are within prediction intervals. Therefore, the model validation was successful.
+
+```{r}
+# produce graph with 100 forecasts 
+pred.tra <- predict(fit.2, n.ahead = 100)
+U.tr= pred.tra$pred + 2*pred.tra$se 
+L.tr= pred.tra$pred - 2*pred.tra$se 
+ts.plot(logtrain, xlim=c(100,length(logtrain)+100),
+        ylim = c(min(logtrain),max(U.tr)), main = "graph with 100 forecasts")
+lines(U.tr, col="blue", lty="dashed")
+lines(L.tr, col="blue", lty="dashed")
+points((length(logtrain)+1):(length(logtrain)+100), pred.tra$pred, col="red")
+```
+
+
+The provided graph displays an additional 100 forecasts based on transformed data. It is evident from the graph that the confidence interval has expanded significantly. This substantial increase in the confidence interval indicates a decrease in certainty when predicting the average temperature of Los Angeles in the future. Consequently, we can conclude that the ability to predict future average temperatures with accuracy and confidence has diminished.
+
+# Conclusion
+The goal of this project was to provide an accurate forecast of future temperatures in Los Angeles by applying time series analysis on historical data to gain clinical insights. It began with the revelation that the raw data was non-stationary, with clear increasing trends and non-constant variance. Several transformations, including log transformation and differencing at lag 1, were used to make the data stationary. 
+
+After analysis of Autocorrelation Function and Partial Autocorrelation Function, several promising models were identified for forecasting. After calculating the AIC for these models, AR(2) and MA(1) emerged as the optimal choices due to lower AIC values. 
+
+Eventually, the MA(1) model was deemed the most suitable for our forecasting needs, having the lowest AIC value and a simpler structure. Diagnostic checks further established its validity. The forecasts produced by the model proved to be quite accurate for the near future (11 years), as evidenced by a comparison with actual data.
+
+Despite its short-term success, the model demonstrated its limitations for longer-term forecasts, with the confidence interval broadening. This reflects the inherent difficulties in making long-term climate predictions, and highlights the importance of cautious interpretation of extended forecasts. Additionally, it is worth noting that historical data from 1880 onwards shows a clear increasing trend. While this does not guarantee future temperature increases, it's a trend that can't be ignored when considering the potential for future climate changes. 
+
+The analysis presented in this report reaffirms the utility of time series analysis in understanding climate trends and predicting future temperatures. Although the MA(1) model displayed satisfactory performance for short-term forecasting, its limitations for long-term predictions and the visible historical trend emphasize the need for ongoing research.
